@@ -1,19 +1,15 @@
 #!/usr/bin/env python
-# file extract_primers.py
-''' Extract Primers from sequence reads, for .fastq and .fasta files.
-'''
-
-""" last field is edit distance tolerance
-"""
-# python extract_primers_lev.py <mappingfile> <merged.fastq> <output_name> <tol>
-
 __author__ = "Billy Fournier"
 __license__ = "GPL"
 __email__ = "billyfournier2000@yahoo.com"
 __credits__ = "William Walters"
-""" This script is an adaptation of William Walters work with
-    the qiime project.
+
+
+
+# python extract_primers_lev.py <mappingfile> <merged.fastq> <output_name> <tol>
+""" last field is edit distance tolerance
 """
+
 
 from sys import argv
 from string import upper
