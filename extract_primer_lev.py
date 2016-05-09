@@ -180,7 +180,6 @@ def remove_primers(input_fastq, output_fastq,for_primers,rev_primers):
                 # print type(start_slice), '\t',end_slice
 
             if (start_slice != -1) and (end_slice != -1):
-                print seq[start_slice:end_slice]
                 curr_seq = seq[start_slice:end_slice]
                 curr_qual = qual[start_slice:end_slice]
                 formatted_fastq_line = format_fastq_record(label, curr_seq, curr_qual)
