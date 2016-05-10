@@ -10,7 +10,6 @@ __credits__ = "William Walters"
 """ last field is edit distance tolerance
 """
 
-
 from sys import argv
 from string import upper
 from itertools import product
@@ -20,6 +19,19 @@ from skbio.sequence import DNA
 from skbio.parse.sequences import parse_fastq
 from skbio.format.sequences import format_fastq_record
 
+
+import cProfile
+def do_cprofile(func):
+    def profiled_func(*args, **kwargs):
+        profile = cProfile.Profile()
+        try:
+            profile.enable()
+            result = func(*args, **kwargs)
+            profile.disable()
+            return result
+        finally:
+            profile.print_stats()
+    return profiled_func
 
 
 
@@ -131,18 +143,24 @@ def editDistance(s1,s2):
 # print(editDistance("kitten","sitting"))
 # print(editDistance("rosettacode","raisethysword"))
 
+"""
+@param s1   primer string
+@param s2   sequence string
+@param tolerance    maximum edit distances
+@return good[2]     index of string
+"""
+
 def editSearchForward(s1,s2,tolerance):
     windowSize = len(s1)
     start = 0
     good = [tolerance,'',-1]
     index = -1
-    for i in range(30):
+    for i in range(windowSize + 1):
         if i-windowSize <= 0:
             start = 0
         else:
             start = i - windowSize
         ed = editDistance(s1,s2[start:i])
-        # print s2[start:i]
         if ed < good[0]:
             good[0] = ed
             good[1] = [s2[start:i]]
@@ -156,7 +174,7 @@ def editSearchReverse(s1,s2,tolerance):
     start = 0
     good = [tolerance,'',-1]
     index = -1
-    for i in xrange(seqLen, seqLen-24, -1):
+    for i in xrange(seqLen, seqLen-windowSize + 1, -1):
         if i + windowSize >= seqLen:
             end = seqLen
         else:
@@ -170,6 +188,7 @@ def editSearchReverse(s1,s2,tolerance):
             # print good
     return good[2]
 
+@do_cprofile
 def remove_primers(input_fastq, output_fastq,for_primers,rev_primers):
     count = 0
     with open(input_fastq) as read, open(output_fastq, "w") as out_seqs:
@@ -193,4 +212,5 @@ ed_tol = argv[4]
 
 
 forward_primers, reverse_primers = get_primers(mapping_file)
+
 remove_primers(merged_file,output_file,forward_primers,reverse_primers)
