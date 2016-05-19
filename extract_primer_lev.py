@@ -20,6 +20,105 @@ from skbio.parse.sequences import parse_fastq
 from skbio.format.sequences import format_fastq_record
 
 
+import time
+import functools
+import collections
+def lru_cache(maxsize = 255, timeout = None):
+    class _LRU_Cache_class(object):
+        def __init__(self, input_func, max_size, timeout):
+            self._input_func        = input_func
+            self._max_size          = max_size
+            self._timeout           = timeout
+
+            # This will store the cache for this function, format - {caller1 : [OrderedDict1, last_refresh_time1], caller2 : [OrderedDict2, last_refresh_time2]}.
+            #   In case of an instance method - the caller is the instance, in case called from a regular function - the caller is None.
+            self._caches_dict        = {}
+
+        def cache_clear(self, caller = None):
+            # Remove the cache for the caller, only if exists:
+            if caller in self._caches_dict:
+                del self._caches_dict[caller]
+                self._caches_dict[caller] = [collections.OrderedDict(), time.time()]
+
+        def __get__(self, obj, objtype):
+            """ Called for instance methods """
+            return_func = functools.partial(self._cache_wrapper, obj)
+            return_func.cache_clear = functools.partial(self.cache_clear, obj)
+            # Return the wrapped function and wraps it to maintain the docstring and the name of the original function:
+            return functools.wraps(self._input_func)(return_func)
+
+        def __call__(self, *args, **kwargs):
+            """ Called for regular functions """
+            return self._cache_wrapper(None, *args, **kwargs)
+        # Set the cache_clear function in the __call__ operator:
+        __call__.cache_clear = cache_clear
+
+
+        def _cache_wrapper(self, caller, *args, **kwargs):
+            # Create a unique key including the types (in order to differentiate between 1 and '1'):
+            kwargs_key = "".join(map(lambda x : str(x) + str(type(kwargs[x])) + str(kwargs[x]), sorted(kwargs)))
+            key = "".join(map(lambda x : str(type(x)) + str(x) , args)) + kwargs_key
+
+            # Check if caller exists, if not create one:
+            if caller not in self._caches_dict:
+                self._caches_dict[caller] = [collections.OrderedDict(), time.time()]
+            else:
+                # Validate in case the refresh time has passed:
+                if self._timeout != None:
+                    if time.time() - self._caches_dict[caller][1] > self._timeout:
+                        self.cache_clear(caller)
+
+            # Check if the key exists, if so - return it:
+            cur_caller_cache_dict = self._caches_dict[caller][0]
+            if key in cur_caller_cache_dict:
+                return cur_caller_cache_dict[key]
+
+            # Validate we didn't exceed the max_size:
+            if len(cur_caller_cache_dict) >= self._max_size:
+                # Delete the first item in the dict:
+                cur_caller_cache_dict.popitem(False)
+
+            # Call the function and store the data in the cache (call it with the caller in case it's an instance function - Ternary condition):
+            cur_caller_cache_dict[key] = self._input_func(caller, *args, **kwargs) if caller != None else self._input_func(*args, **kwargs)
+            return cur_caller_cache_dict[key]
+
+
+    # Return the decorator wrapping the class (also wraps the instance to maintain the docstring and the name of the original function):
+    return (lambda input_func : functools.wraps(input_func)(_LRU_Cache_class(input_func, maxsize, timeout)))
+
+# @lru_cache(maxsize=4095)
+# @lru_cache(maxsize=8190) # may need to alter cashe size
+@lru_cache(maxsize=16380)
+def ld(s, t):
+	if not s: return len(t)
+	if not t: return len(s)
+	if s[0] == t[0]: return ld(s[1:], t[1:])
+	l1 = ld(s, t[1:])
+	l2 = ld(s[1:], t)
+	l3 = ld(s[1:], t[1:])
+	return 1 + min(l1, l2, l3)
+
+def editDistance(s1,s2):
+    if len(s1) > len(s2):
+        s1,s2 = s2,s1
+    distances = range(len(s1) + 1)
+    for index2,char2 in enumerate(s2):
+        newDistances = [index2+1]
+        for index1,char1 in enumerate(s1):
+            if char1 == char2:
+                newDistances.append(distances[index1])
+            else:
+                newDistances.append(1 + min((distances[index1],
+                                             distances[index1+1],
+                                             newDistances[-1])))
+        distances = newDistances
+    return distances[-1]
+# print(editDistance("kitten","sitting"))
+# print(editDistance("rosettacode","raisethysword"))
+
+
+
+
 import cProfile
 def do_cprofile(func):
     def profiled_func(*args, **kwargs):
@@ -124,72 +223,43 @@ def get_primers(mapping_file):
 
     return forward_primers, reverse_primers
 
-def editDistance(s1,s2):
-    if len(s1) > len(s2):
-        s1,s2 = s2,s1
-    distances = range(len(s1) + 1)
-    for index2,char2 in enumerate(s2):
-        newDistances = [index2+1]
-        for index1,char1 in enumerate(s1):
-            if char1 == char2:
-                newDistances.append(distances[index1])
-            else:
-                newDistances.append(1 + min((distances[index1],
-                                             distances[index1+1],
-                                             newDistances[-1])))
-        distances = newDistances
-    return distances[-1]
-
-# print(editDistance("kitten","sitting"))
-# print(editDistance("rosettacode","raisethysword"))
 
 """
 @param s1   primer string
 @param s2   sequence string
 @param tolerance    maximum edit distances
-@return good[2]     index of string
+@return index     Start or End index to use in sequence string
 """
-
+# Search from the front. V2
 def editSearchForward(s1,s2,tolerance):
     windowSize = len(s1)
-    start = 0
-    good = [tolerance,'',-1]
-    index = -1
-    for i in range(windowSize + 1):
-        if i-windowSize <= 0:
-            start = 0
-        else:
-            start = i - windowSize
-        ed = editDistance(s1,s2[start:i])
-        if ed < good[0]:
-            good[0] = ed
-            good[1] = [s2[start:i]]
-            good[2] = i
-            # print good
-    return good[2]
+    ed_check = int(tolerance)
+    index = 0
+    for i in range(int(tolerance)):
+        # ed = editDistance(s1,s2[0: windowSize - i])
+        ed = ld(s1,s2[0: windowSize - i])
+        if ed < ed_check:
+            ed_check = ed
+            index = windowSize - i
+    return index
 
+# Search from back
 def editSearchReverse(s1,s2,tolerance):
     windowSize = len(s1)
-    seqLen = len(s2)
-    start = 0
-    good = [tolerance,'',-1]
-    index = -1
-    for i in xrange(seqLen, seqLen-windowSize + 1, -1):
-        if i + windowSize >= seqLen:
-            end = seqLen
-        else:
-            end = i + windowSize
-        ed = editDistance(s1,s2[i:end])
-        # print s2[start:i]
-        if ed < good[0]:
-            good[0] = ed
-            good[1] = [s2[i:end]]
-            good[2] = i
-            # print good
-    return good[2]
+    seqEnd = len(s2) - windowSize
+    ed_check = tolerance
+    index = 0
+    for i in range(int(tolerance)):
+        # ed = editDistance(s1,s2[seqEnd + i: -1])
+        ed = ld(s1,s2[seqEnd + i: -1])
+        if ed < ed_check:
+            ed_check = ed
+            index = i + seqEnd
+    return index
+
 
 @do_cprofile
-def remove_primers(input_fastq, output_fastq,for_primers,rev_primers):
+def remove_primers(input_fastq, output_fastq,for_primers,rev_primers, ed_tol):
     count = 0
     with open(input_fastq) as read, open(output_fastq, "w") as out_seqs:
         for label,seq,qual in parse_fastq(read):
@@ -213,4 +283,4 @@ ed_tol = argv[4]
 
 forward_primers, reverse_primers = get_primers(mapping_file)
 
-remove_primers(merged_file,output_file,forward_primers,reverse_primers)
+remove_primers(merged_file,output_file,forward_primers,reverse_primers, ed_tol)
